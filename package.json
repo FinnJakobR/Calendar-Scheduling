@@ -1,0 +1,20 @@
+{
+  "name": "kalender_ai",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsc && node build/main.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^24.5.2",
+    "moment": "^2.30.1"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.0.0"
+  }
+}
