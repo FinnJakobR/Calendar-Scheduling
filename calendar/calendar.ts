@@ -1,4 +1,6 @@
+import moment from "moment";
 import Intervall from "../intervall/intervall";
+import Appointment from "../appointments/appointment";
 
 export default class Calendar {
   public intervals: Intervall[][] = [[], [], [], [], [], [], []];
@@ -18,6 +20,18 @@ export default class Calendar {
     return this.intervals.map((i) =>
       i.reduce((sum, v) => sum + v.end.diff(v.start, "minute"), 0)
     );
+  }
+
+  findByDate(date: moment.Moment): Appointment | undefined {
+    const weekDay = date.weekday();
+
+    const appointments = this.intervals[weekDay];
+
+    const foundAppointment = appointments.find((a) =>
+      date.isBetween(a.start, a.end)
+    );
+
+    return foundAppointment?.appointment;
   }
 
   getWorkingTimeOnSunday() {

@@ -1,9 +1,12 @@
 import moment from "moment";
-import Appointment, { AppointmentPreferences } from "./appointment";
+import Appointment, {
+  AppointmentPreferences,
+  ConstrainedInterval,
+} from "./appointment";
 
 export default class FlexibleAppointment extends Appointment {
   public duration: moment.Duration;
-  public deadline?: moment.Moment;
+  public deadline?: ConstrainedInterval;
   public priority: number;
   public preference: AppointmentPreferences;
   public used: boolean = false;
@@ -12,9 +15,10 @@ export default class FlexibleAppointment extends Appointment {
     name: string,
     duration: moment.Duration,
     priority: number,
-    preferences: AppointmentPreferences
+    preferences: AppointmentPreferences,
+    allowSplitting: boolean
   ) {
-    super(name);
+    super(name, allowSplitting);
     this.duration = duration;
     this.priority = priority;
     this.preference = preferences;
