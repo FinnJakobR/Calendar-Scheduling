@@ -1,5 +1,7 @@
 import moment from "moment";
-import Appointment from "../appointments/appointment";
+import Appointment, {
+  AppointmentPreferences,
+} from "../appointments/appointment";
 import FlexibleAppointment from "../appointments/flexible_appointments";
 import FixedAppointment from "../appointments/fixed_appointments";
 import Intervall from "./intervall";
@@ -7,8 +9,9 @@ import Calendar from "../calendar/calendar";
 import { startTime, endTime, weekDays } from "../settings/settings";
 import ConstrainedAppointment from "../appointments/constrained_appointment";
 import scheduleContstrainedAppointment from "./scheudling";
+import { fa } from "@faker-js/faker";
 
-const MAX_ATTEMPTS = 100; // maximale Versuche, einen Slot zu finden
+const MAX_ATTEMPTS = 2000; // maximale Versuche, einen Slot zu finden
 
 // Prüft, ob ein neues Intervall mit bestehenden Intervallen des gleichen Tages überlappt
 function checkIfOverlaps(dayIntervals: Intervall[], newInterval: Intervall) {
@@ -19,6 +22,53 @@ function checkIfOverlaps(dayIntervals: Intervall[], newInterval: Intervall) {
   );
 }
 
+function calcHammingDistance(parentA: Calendar, parentB: Calendar): number {
+  let distance = 0;
+
+  const intervalsA = parentA.intervals;
+
+  for (const weekDay of intervalsA) {
+    for (const timeSlot of weekDay) {
+      const slotB = parentB.findByDate(timeSlot.start);
+
+      const apptA = timeSlot.appointment;
+      const apptB = slotB;
+
+      // Unterschied, wenn einer frei ist und der andere belegt
+      if ((apptA && !apptB) || (!apptA && apptB)) {
+        distance++;
+      }
+      // Unterschied, wenn beide belegt, aber unterschiedliche IDs
+      else if (apptA && apptB && apptA.id !== apptB.id) {
+        distance++;
+      }
+      // sonst: beide frei oder gleiche ID → kein Unterschied
+    }
+  }
+
+  // Optional: Slots, die nur in parentB existieren
+  // if parentB hat mehr Slots, die parentA nicht hat, distance += extra
+
+  return distance;
+}
+
+function checkifAfterDeadline(slot: Intervall) {
+  if (!(slot.appointment instanceof FlexibleAppointment)) return false;
+
+  if (
+    slot.appointment instanceof FlexibleAppointment &&
+    !slot.appointment.deadline
+  )
+    return false;
+
+  const deadline = slot.appointment.deadline;
+
+  return slot.end.isAfter(deadline?.start);
+}
+
+function dontPassHardConstrains(dayIntervals: Intervall[], slot: Intervall) {
+  return checkIfOverlaps(dayIntervals, slot) || checkifAfterDeadline(slot);
+}
 // Generiert einen zufälligen Slot für eine flexible Aufgabe an einem gegebenen Tag
 function generateRandomSlot(
   appointment: FlexibleAppointment,
@@ -30,8 +80,7 @@ function generateRandomSlot(
   const availableMinutes =
     dayEnd.diff(dayStart, "minutes") - appointment.duration.asMinutes();
 
-  if (availableMinutes <= 0)
-    throw new Error("Appointment longer than available day");
+  if (availableMinutes <= 0) return null;
 
   let attempts = 0;
   let slot: Intervall;
@@ -42,7 +91,10 @@ function generateRandomSlot(
     const end = start.clone().add(appointment.duration);
     slot = new Intervall(start, end, 1, appointment);
     attempts++;
-  } while (checkIfOverlaps(dayIntervals, slot) && attempts < MAX_ATTEMPTS);
+  } while (
+    dontPassHardConstrains(dayIntervals, slot) &&
+    attempts < MAX_ATTEMPTS
+  );
 
   if (attempts >= MAX_ATTEMPTS) {
     throw new Error(
@@ -96,7 +148,7 @@ function mutate(c: Calendar, appointments: Appointment[]): Calendar {
     newIntervals.push(...day);
   }
 
-  // Anzahl der zu mutierenden Termine zufällig zwischen 1 und 3 (oder max vorhandene)
+  // Anzahl der zu mutierenden Termine zufällig zwischen 1 und 20 (oder max vorhandene)
   const maxMutations = Math.min(1, 20);
   const numMutations = 1 + Math.floor(Math.random() * maxMutations);
 
@@ -107,6 +159,71 @@ function mutate(c: Calendar, appointments: Appointment[]): Calendar {
     if (interval.appointment instanceof FlexibleAppointment) {
       // Zufälligen Tag auswählen
       const randomDay = Math.floor(Math.random() * 7);
+
+      const shouldSplit = Math.random() < 0.5;
+
+      if (shouldSplit && interval.appointment.allowSplitting) {
+        const totalDuration = interval.appointment.duration.asMinutes();
+
+        // Anzahl Stunden im Termin (z. B. 180 Min = 3 Stunden)
+        const fullMinutes = Math.floor(totalDuration / 30);
+
+        // Wenn der Termin kürzer als 2 Stunden ist → nicht splitten
+        if (fullMinutes > 1) {
+          // Mögliche Cuts: jede volle Stunde
+          const possibleCuts = Array.from(
+            { length: fullMinutes - 1 },
+            (_, i) => (i + 1) * 30
+          );
+
+          const maxParts = Math.min(4, fullMinutes, possibleCuts.length + 1);
+          const numParts = 2 + Math.floor(Math.random() * (maxParts - 1));
+
+          // Zufällige Auswahl aus diesen Stunden
+          const cutPoints = new Set<number>();
+          while (cutPoints.size < numParts - 1) {
+            const cut =
+              possibleCuts[Math.floor(Math.random() * possibleCuts.length)];
+            cutPoints.add(cut);
+          }
+
+          const sortedCuts = [...cutPoints].sort((a, b) => a - b);
+
+          // Startzeit merken
+          let currentStart = interval.start.clone();
+          let lastPoint = 0;
+
+          const splitted: Intervall[] = [];
+
+          for (const cut of [...sortedCuts, totalDuration]) {
+            const partDuration = cut - lastPoint;
+
+            const newAppt = new FlexibleAppointment(
+              interval.appointment.name,
+              moment.duration(partDuration, "minutes"),
+              interval.appointment.priority,
+              interval.appointment.preference,
+              interval.appointment.allowSplitting
+            );
+
+            const newInterval: Intervall = new Intervall(
+              currentStart.clone(),
+              currentStart.clone().add(partDuration, "minutes"),
+              interval.appointment.priority,
+              newAppt
+            );
+
+            splitted.push(newInterval);
+
+            currentStart = newInterval.end.clone();
+            lastPoint = cut;
+          }
+
+          // Ersetze das alte Intervall durch die Splits
+          newIntervals.splice(idx, 1, ...splitted);
+          continue; // fertig mit dieser Mutation
+        }
+      }
 
       // Alle Intervalle am neuen Tag filtern
       const dayIntervals = newIntervals.filter((int) =>
@@ -264,20 +381,21 @@ export function generateCalendar(
     scored.sort((a, b) => b.fitness - a.fitness);
 
     // Top 5 direkt behalten
-    const elite = scored.slice(0, 2).map((s) => s.ind);
+    const elite = scored.slice(0, 4).map((s) => s.ind);
 
     // Rest mit Roulette-Selektion
 
     const offspring: Calendar[] = [];
 
     for (const individuum of population) {
-      if (Math.random() < 0.05) {
+      if (Math.random() < 0.4) {
         offspring.push(mutate(individuum, appointments));
       }
 
-      if (Math.random() < 0.2) {
+      if (Math.random() < 0.3) {
         const secondParent =
           population[Math.floor(Math.random() * population.length)];
+
         offspring.push(crossover(individuum, secondParent));
       }
     }

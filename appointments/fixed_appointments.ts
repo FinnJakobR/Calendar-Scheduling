@@ -6,7 +6,7 @@ export default class FixedAppointment extends Appointment {
   public end: moment.Moment;
 
   constructor(name: string, start: moment.Moment, end: moment.Moment) {
-    super(name);
+    super(name, false);
     this.start = start;
     this.end = end;
   }
